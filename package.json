@@ -1,6 +1,7 @@
 {
   "name": "undici-rain-check",
   "version": "1.0.0",
+  "description": "Guaranteed delivery for HTTP requests, using undici http client",
   "author": "Igor Savin <kibertoad@gmail.com>",
   "main": "dist/undici-rain-check",
   "types": "dist/index.d.ts",
