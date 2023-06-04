@@ -9,8 +9,8 @@ import { RedisTimeoutError } from './RedisTimeoutError'
 const TIMEOUT = Symbol()
 
 export type RainCheckSuccessCallback<T> = (
-  rainCheck: RequestRainCheck,
   requestResult: RequestResult<T>,
+  rainCheck: RequestRainCheckParams,
 ) => Promise<void>
 
 export type RequestRainCheck = {
@@ -26,6 +26,7 @@ export type RequestRainCheckParams = {
   redisListKey: string
   rainCheckRetryInMsecs: number
   expiresInMsecs: number
+  sleepUntilSuccessful?: boolean
 }
 
 export type UndiciRainCheckConfig = {
@@ -34,6 +35,7 @@ export type UndiciRainCheckConfig = {
   requestExpiresInMsecs?: number
   redisTimeoutInMsecs?: number
   guaranteedDelivery: boolean
+  statusCodeSkipList?: readonly number[]
 }
 
 export class UndiciRainCheck {
@@ -41,12 +43,16 @@ export class UndiciRainCheck {
   private readonly redis: Redis
   private readonly guaranteedDelivery: boolean
   private readonly redisTimeoutInMsecs?: number
+  private readonly statusCodeSkipList: Set<number>
 
   constructor(config: UndiciRainCheckConfig) {
     this.client = config.client
     this.redis = config.redis
     this.guaranteedDelivery = config.guaranteedDelivery ?? true
     this.redisTimeoutInMsecs = config.redisTimeoutInMsecs
+    this.statusCodeSkipList = config.statusCodeSkipList
+      ? new Set(config.statusCodeSkipList)
+      : new Set([400, 401, 403, 404, 405])
   }
 
   protected executeInRedisWithTimeout<T>(originalPromise: Promise<T>): Promise<T> {
@@ -78,12 +84,17 @@ export class UndiciRainCheck {
   async sendRequest<T>(
     request: Dispatcher.RequestOptions,
     rainCheckParams: RequestRainCheckParams,
+    callback?: RainCheckSuccessCallback<T>,
     retryConfig?: RetryConfig,
   ): Promise<Either<RequestResult<unknown>, RequestResult<T>>> {
     const now = Date.now()
     const result = await sendWithRetry<T>(this.client, request, retryConfig)
 
-    if (result.error && this.guaranteedDelivery) {
+    if (
+      result.error &&
+      this.guaranteedDelivery &&
+      !this.statusCodeSkipList.has(result.error.statusCode)
+    ) {
       const storedRequest: RequestRainCheck = {
         rainCheckParams,
         expiresAt: now + rainCheckParams.expiresInMsecs,
@@ -95,6 +106,14 @@ export class UndiciRainCheck {
       await this.executeInRedisWithTimeout(
         this.redis.rpush(rainCheckParams.redisListKey, JSON.stringify(storedRequest)),
       )
+    }
+
+    if (result.result && callback) {
+      await callback(result.result, rainCheckParams)
+    }
+
+    if (result.error && rainCheckParams.sleepUntilSuccessful) {
+      throw new Error('Implicit sleep is not supported yet')
     }
 
     return result
@@ -126,14 +145,12 @@ export class UndiciRainCheck {
       await this.executeInRedisWithTimeout(this.redis.rpush(redisListKey, rainCheckString))
     }
 
-    const result = await this.sendRequest<T>(
+    await this.sendRequest<T>(
       rainCheck.request,
       rainCheck.rainCheckParams,
+      callback,
       rainCheck.retryConfig,
     )
-    if (callback && result.result) {
-      await callback(rainCheck, result.result)
-    }
 
     return true
   }

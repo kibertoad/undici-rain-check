@@ -67,8 +67,8 @@ describe('UndiciRainCheck', () => {
     await rainCheck.consumeRainCheck('myList', () => {
       throw new Error('Should not succeed ')
     })
-    await rainCheck.consumeRainCheck('myList', async (rainCheck, requestResult) => {
-      expect(rainCheck.rainCheckParams.id).toBe('testRequest')
+    await rainCheck.consumeRainCheck('myList', async (requestResult, rainCheck) => {
+      expect(rainCheck.id).toBe('testRequest')
       expect(requestResult.body).toEqual({ status: 'OK' })
     })
   })
