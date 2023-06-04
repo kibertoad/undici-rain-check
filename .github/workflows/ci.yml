@@ -32,8 +32,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Start Docker
+        run: npm run docker:start
+
       - name: Run Tests
         run: npm run test:coverage
+
+      - name: Stop Docker
+        run: npm run docker:stop
 
   automerge:
     needs: build
